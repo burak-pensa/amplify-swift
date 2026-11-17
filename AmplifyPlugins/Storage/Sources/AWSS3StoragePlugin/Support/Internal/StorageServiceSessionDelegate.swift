@@ -248,7 +248,8 @@ extension StorageServiceSessionDelegate: URLSessionTaskDelegate {
                 uploadPartEvent: .progressUpdated(
                     partNumber: partNumber,
                     bytesTransferred: UInt64(bytesSent),
-                    taskIdentifier: task.taskIdentifier
+                    taskIdentifier: task.taskIdentifier,
+                    totalBytesSent: UInt64(max(0, totalBytesSent))
                 )
             )
             resetProgressStallTimer(taskIdentifier: task.taskIdentifier)

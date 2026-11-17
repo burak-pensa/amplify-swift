@@ -19,6 +19,10 @@ protocol StorageMultipartUploadClient {
     func abortMultipartUpload(uploadId: UploadID, error: Error?) throws
 
     func cancelUploadTasks(taskIdentifiers: [TaskIdentifier], done: @escaping @Sendable () -> Void)
+
+    /// Bytes sent so far by each upload task that is still registered. A task that is not
+    /// registered is left out. Synchronous, no network: used by the progress stall timer.
+    func bytesSent(taskIdentifiers: [TaskIdentifier]) -> [TaskIdentifier: Int64]
 }
 
 extension StorageMultipartUploadClient {
@@ -223,6 +227,17 @@ class DefaultStorageMultipartUploadClient: StorageMultipartUploadClient, @unchec
             }
             done()
         }
+    }
+
+    func bytesSent(taskIdentifiers: [TaskIdentifier]) -> [TaskIdentifier: Int64] {
+        guard let serviceProxy else { return [:] }
+        var result: [TaskIdentifier: Int64] = [:]
+        for taskIdentifier in taskIdentifiers {
+            if let sent = serviceProxy.findTask(taskIdentifier: taskIdentifier)?.sessionTask?.countOfBytesSent {
+                result[taskIdentifier] = sent
+            }
+        }
+        return result
     }
 
     // MARK: - Private -

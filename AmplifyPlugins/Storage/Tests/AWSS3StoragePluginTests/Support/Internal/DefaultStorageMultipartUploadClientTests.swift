@@ -335,6 +335,25 @@ class DefaultStorageMultipartUploadClientTests: XCTestCase, @unchecked Sendable 
         XCTAssertEqual(serviceProxy.unregisterTaskIdentifiersCount, 1)
     }
 
+    /// Given: a DefaultStorageMultipartUploadClient whose service registry holds two part tasks
+    /// When: bytesSent is invoked for those two and for one that is not registered
+    /// Then: it returns each registered task's countOfBytesSent and leaves out the unknown one
+    func testBytesSent_shouldReadRegisteredSessionTasks() {
+        for (taskIdentifier, sent) in [(7, Int64(1_000)), (8, Int64(0))] {
+            let subTask = StorageTransferTask(
+                transferType: .multiPartUploadPart(uploadId: "uploadId", partNumber: taskIdentifier),
+                bucket: "bucket",
+                key: "key"
+            )
+            subTask.sessionTask = MockStorageSessionTask(taskIdentifier: taskIdentifier, state: .running, countOfBytesSent: sent)
+            serviceProxy.register(task: subTask)
+        }
+
+        let result = client.bytesSent(taskIdentifiers: [7, 8, 9])
+
+        XCTAssertEqual(result, [7: 1_000, 8: 0])
+    }
+
     /// Given: a DefaultStorageMultipartUploadClient
     /// When: filter is invoked with some disallowed values
     /// Then: a  dictionary is returned with the disallowed values removed
@@ -373,9 +392,17 @@ private class MockStorageServiceProxy: StorageServiceProxy, @unchecked Sendable 
         self.awsS3 = awsS3
     }
 
-    func register(task: StorageTransferTask) {}
+    var tasks: [TaskIdentifier: StorageTransferTask] = [:]
+    func register(task: StorageTransferTask) {
+        guard let taskIdentifier = task.taskIdentifier else { return }
+        tasks[taskIdentifier] = task
+    }
 
     func unregister(task: StorageTransferTask) {}
+
+    func findTask(taskIdentifier: TaskIdentifier) -> StorageTransferTask? {
+        tasks[taskIdentifier]
+    }
 
     var unregisterTaskIdentifiersCount = 0
     func unregister(taskIdentifiers: [TaskIdentifier]) {

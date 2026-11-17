@@ -292,7 +292,7 @@ enum StorageMultipartUpload {
             parts[index] = .queued(bytes: part.bytes)
         case .started(_, let taskIdentifier):
             parts[index] = .inProgress(bytes: part.bytes, bytesTransferred: 0, taskIdentifier: taskIdentifier)
-        case .progressUpdated(_, let bytesTransferred, _):
+        case .progressUpdated(_, let bytesTransferred, _, _):
             guard case .inProgress(let bytes, _, let taskIdentifier) = part else {
                 throw Failure.invalidStateTransition(reason: "Cannot update progress: part must be in progress")
             }

@@ -261,7 +261,7 @@ class StorageServiceSessionDelegateTests: XCTestCase, @unchecked Sendable {
             totalBytesExpectedToSend: 120
         )
         XCTAssertEqual(multipartSession.handleUploadPartCount, 1)
-        guard case .progressUpdated(let partNumber, let bytesTransferred, let taskIdentifier) = multipartSession.lastUploadEvent else {
+        guard case .progressUpdated(let partNumber, let bytesTransferred, let taskIdentifier, let totalBytesSent) = multipartSession.lastUploadEvent else {
             XCTFail("Expected .progressUpdated event")
             return
         }
@@ -269,6 +269,7 @@ class StorageServiceSessionDelegateTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(partNumber, 3)
         XCTAssertEqual(bytesTransferred, 10)
         XCTAssertEqual(taskIdentifier, task.taskIdentifier)
+        XCTAssertEqual(totalBytesSent, 100)
     }
 
     /// Given: A StorageServiceSessionDelegate with progressStallTimeoutInterval > 0 and an upload task

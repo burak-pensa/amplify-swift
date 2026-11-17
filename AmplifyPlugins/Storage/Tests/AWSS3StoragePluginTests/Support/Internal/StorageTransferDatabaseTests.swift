@@ -24,10 +24,12 @@ struct MockStorageURLSession: StorageURLSession {
 struct MockStorageSessionTask: StorageSessionTask {
     let taskIdentifier: TaskIdentifier
     let state: URLSessionTask.State
+    let countOfBytesSent: Int64
 
-    init(taskIdentifier: TaskIdentifier, state: URLSessionTask.State = .suspended) {
+    init(taskIdentifier: TaskIdentifier, state: URLSessionTask.State = .suspended, countOfBytesSent: Int64 = 0) {
         self.taskIdentifier = taskIdentifier
         self.state = state
+        self.countOfBytesSent = countOfBytesSent
     }
 }
 

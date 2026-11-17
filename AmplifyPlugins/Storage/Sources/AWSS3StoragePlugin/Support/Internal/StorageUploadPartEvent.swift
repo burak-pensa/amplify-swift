@@ -10,7 +10,9 @@ import Foundation
 enum StorageUploadPartEvent {
     case queued(partNumber: PartNumber)
     case started(partNumber: PartNumber, taskIdentifier: TaskIdentifier)
-    case progressUpdated(partNumber: PartNumber, bytesTransferred: UInt64, taskIdentifier: TaskIdentifier)
+    /// `bytesTransferred` is the delta of the last `didSendBodyData` callback, as before.
+    /// `totalBytesSent` is the task's running total, which the stall timer uses as its baseline.
+    case progressUpdated(partNumber: PartNumber, bytesTransferred: UInt64, taskIdentifier: TaskIdentifier, totalBytesSent: UInt64)
     case completed(partNumber: PartNumber, eTag: String, taskIdentifier: TaskIdentifier)
     case failed(partNumber: PartNumber, error: Error)
 
@@ -18,7 +20,7 @@ enum StorageUploadPartEvent {
         switch self {
         case .queued(let number),
                 .started(let number, _),
-                .progressUpdated(let number, _, _),
+                .progressUpdated(let number, _, _, _),
                 .completed(let number, _, _),
                 .failed(let number, _):
             return number
@@ -28,7 +30,7 @@ enum StorageUploadPartEvent {
     var taskIdentifier: TaskIdentifier? {
         let result: Int? = switch self {
         case .started(_, let taskIdentifier),
-                .progressUpdated(_, _, let taskIdentifier),
+                .progressUpdated(_, _, let taskIdentifier, _),
                 .completed(_, _, let taskIdentifier):
             taskIdentifier
         default:

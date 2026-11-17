@@ -20,6 +20,7 @@ protocol StorageServiceProxy: AnyObject, Sendable {
     func register(task: StorageTransferTask)
     func unregister(task: StorageTransferTask)
     func unregister(taskIdentifiers: [TaskIdentifier])
+    func findTask(taskIdentifier: TaskIdentifier) -> StorageTransferTask?
 
     func register(multipartUploadSession: StorageMultipartUploadSession)
     func unregister(multipartUploadSession: StorageMultipartUploadSession)

@@ -603,6 +603,7 @@ private class MockStorageTask: StorageTask {
 private final class MockSessionTask: StorageSessionTask, @unchecked Sendable {
     let taskIdentifier: TaskIdentifier
     let state: URLSessionTask.State
+    let countOfBytesSent: Int64 = 0
 
     init(
         taskIdentifier: TaskIdentifier = 1,

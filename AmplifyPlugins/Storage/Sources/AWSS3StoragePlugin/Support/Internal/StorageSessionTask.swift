@@ -16,6 +16,8 @@ typealias StorageSessionTasks = [StorageSessionTask]
 protocol StorageSessionTask: Sendable {
     var state: URLSessionTask.State { get }
     var taskIdentifier: TaskIdentifier { get }
+    /// Bytes the task has sent so far. `URLSessionTask` provides it.
+    var countOfBytesSent: Int64 { get }
 
     func resume()
     func suspend()
