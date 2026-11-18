@@ -924,4 +924,68 @@ extension StorageMultipartUploadSessionTests {
         XCTAssertEqual(client.abortMultipartUploadCount, 0)
         XCTAssertEqual(client.completeMultipartUploadCount, 1)
     }
+
+    /// T11 (APP-965 F1).
+    /// Given: parts that started and then send no events and no bytes
+    /// When: the stall timer aborts the upload
+    /// Then: the URLSession task of every part in progress is cancelled before the multipart
+    ///   upload is aborted, so that none of them keeps sending
+    func testStallAbortCancelsInProgressPartTasks() {
+        let stallInterval: TimeInterval = 0.1
+        let client = MockMultipartUploadClient()
+        client.shouldStallPartUpload = true
+        let recorder = makeRecorder(expectStall: true, expectCompletion: false)
+        let session = makeStallSession(client: client, recorder: recorder, stallInterval: stallInterval, confirmWindow: 5)
+
+        session.startUpload()
+
+        wait(for: [recorder.stallFailed, recorder.completed], timeout: stallInterval + 1.0)
+        let started = client.everStalledTaskIdentifiers
+        XCTAssertFalse(started.isEmpty)
+        XCTAssertEqual(client.abortMultipartUploadCount, 1)
+        XCTAssertEqual(client.cancelledTaskIdentifiersAtFirstAbort.map(Set.init), Set(started))
+        XCTAssertEqual(client.cancelUploadTasksCallArguments.count, 1)
+    }
+
+    /// T12 (APP-965 F1).
+    /// Given: parts in progress
+    /// When: the upload is cancelled by the caller
+    /// Then: the URLSession task of every part in progress is cancelled before the multipart
+    ///   upload is aborted
+    func testCancelCancelsInProgressPartTasks() {
+        let client = MockMultipartUploadClient()
+        client.shouldStallPartUpload = true
+        let session = StorageMultipartUploadSession(client: client, bucket: "bucket", key: "key", onEvent: { _ in })
+
+        session.startUpload()
+        let started = client.everStalledTaskIdentifiers
+        XCTAssertFalse(started.isEmpty)
+        session.cancel()
+
+        XCTAssertTrue(session.isAborted)
+        XCTAssertEqual(client.abortMultipartUploadCount, 1)
+        XCTAssertEqual(client.cancelledTaskIdentifiersAtFirstAbort.map(Set.init), Set(started))
+        XCTAssertEqual(client.cancelUploadTasksCallArguments.count, 1)
+    }
+
+    /// T13 (APP-965 F1).
+    /// Given: a paused upload, whose part tasks the pause already cancelled
+    /// When: the upload is cancelled by the caller
+    /// Then: the abort cancels no task a second time
+    func testCancelWhilePausedDoesNotCancelTasksAgain() {
+        let client = MockMultipartUploadClient()
+        client.shouldStallPartUpload = true
+        let session = StorageMultipartUploadSession(client: client, bucket: "bucket", key: "key", onEvent: { _ in })
+
+        session.startUpload()
+        let started = client.everStalledTaskIdentifiers
+        XCTAssertFalse(started.isEmpty)
+        session.pause()
+        XCTAssertEqual(client.cancelUploadTasksCallArguments.map(Set.init), [Set(started)])
+        session.cancel()
+
+        XCTAssertTrue(session.isAborted)
+        XCTAssertEqual(client.abortMultipartUploadCount, 1)
+        XCTAssertEqual(client.cancelUploadTasksCallArguments.count, 1)
+    }
 }

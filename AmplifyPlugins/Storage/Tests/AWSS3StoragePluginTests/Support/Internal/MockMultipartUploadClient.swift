@@ -49,6 +49,12 @@ class MockMultipartUploadClient: StorageMultipartUploadClient, @unchecked Sendab
     private var stalledParts: [PartNumber: TaskIdentifier] = [:]
     /// The last `totalBytesSent` this mock reported per task.
     private var reportedTotalBytesSent: [TaskIdentifier: UInt64] = [:]
+    /// Every task identifier this mock started and left stalled. A cancel does not remove one.
+    private var everStalledTasks: [TaskIdentifier] = []
+    /// One entry per `cancelUploadTasks` call, in call order.
+    private var cancelUploadTasksCalls: [[TaskIdentifier]] = []
+    /// What had been cancelled when `abortMultipartUpload` was first called.
+    private var cancelledTasksAtFirstAbort: [TaskIdentifier]?
     /// Delays the `.completed` event from `completeMultipartUpload`, simulating a slow request.
     var completeMultipartUploadDelay: TimeInterval = 0
     /// Overrides the eTag a completed part reports. An empty eTag fails `validateForCompletion()`.
@@ -95,7 +101,10 @@ class MockMultipartUploadClient: StorageMultipartUploadClient, @unchecked Sendab
         didStartPartUpload?(session, partNumber)
 
         guard !shouldStallPartUpload else {
-            withLock { stalledParts[partNumber] = taskIdentifier }
+            withLock {
+                stalledParts[partNumber] = taskIdentifier
+                everStalledTasks.append(taskIdentifier)
+            }
             return
         }
 
@@ -110,7 +119,10 @@ class MockMultipartUploadClient: StorageMultipartUploadClient, @unchecked Sendab
         didTransferBytesForPartUpload?(session, partNumber, bytesTransferred)
 
         guard !shouldStallPartUploadAfterProgress else {
-            withLock { stalledParts[partNumber] = taskIdentifier }
+            withLock {
+                stalledParts[partNumber] = taskIdentifier
+                everStalledTasks.append(taskIdentifier)
+            }
             return
         }
 
@@ -149,6 +161,11 @@ class MockMultipartUploadClient: StorageMultipartUploadClient, @unchecked Sendab
         guard let session else { throw Failure.sessionNotIntegrated }
 
         increment(\.abortMultipartUploadCount)
+        withLock {
+            if cancelledTasksAtFirstAbort == nil {
+                cancelledTasksAtFirstAbort = cancelUploadTasksCalls.flatMap { $0 }
+            }
+        }
 
         session.handle(multipartUploadEvent: .aborted(uploadId: uploadId, error: error))
         didAbortMultipartUpload?(session, uploadId)
@@ -156,8 +173,27 @@ class MockMultipartUploadClient: StorageMultipartUploadClient, @unchecked Sendab
 
     func cancelUploadTasks(taskIdentifiers: [TaskIdentifier], done: @escaping () -> Void) {
         print("Canceling upload tasks")
-        withLock { stalledParts = stalledParts.filter { !taskIdentifiers.contains($0.value) } }
+        withLock {
+            cancelUploadTasksCalls.append(taskIdentifiers)
+            stalledParts = stalledParts.filter { !taskIdentifiers.contains($0.value) }
+        }
         done()
+    }
+
+    /// Every task identifier this mock started and left stalled, cancelled or not.
+    var everStalledTaskIdentifiers: [TaskIdentifier] {
+        withLock { everStalledTasks }
+    }
+
+    /// The task identifiers of each `cancelUploadTasks` call, in call order.
+    var cancelUploadTasksCallArguments: [[TaskIdentifier]] {
+        withLock { cancelUploadTasksCalls }
+    }
+
+    /// The task identifiers that had been cancelled when `abortMultipartUpload` was first called,
+    /// or nil if it was never called.
+    var cancelledTaskIdentifiersAtFirstAbort: [TaskIdentifier]? {
+        withLock { cancelledTasksAtFirstAbort }
     }
 
     func bytesSent(taskIdentifiers: [TaskIdentifier]) -> [TaskIdentifier: Int64] {

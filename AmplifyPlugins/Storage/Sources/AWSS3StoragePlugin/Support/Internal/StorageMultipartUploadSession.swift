@@ -412,14 +412,20 @@ class StorageMultipartUploadSession: @unchecked Sendable {
         do {
             let wasPaused: Bool
             let snapshot: StorageMultipartUpload
+            let abortedTaskIdentifiers: [TaskIdentifier]
 
-            (wasPaused, snapshot) = try serialQueue.sync {
+            (wasPaused, snapshot, abortedTaskIdentifiers) = try serialQueue.sync {
                 let wasPaused = multipartUpload.isPaused
+                // The aborting state does not keep the parts, so collect their tasks before the transition.
+                var abortedTaskIdentifiers: [TaskIdentifier] = []
+                if case .aborting = multipartUploadEvent {
+                    abortedTaskIdentifiers = inProgressTaskIdentifiers(of: multipartUpload)
+                }
                 try multipartUpload.transition(multipartUploadEvent: multipartUploadEvent)
 
                 // update the transerTask with every state transition
                 transferTask.multipartUpload = multipartUpload
-                return (wasPaused, multipartUpload)
+                return (wasPaused, multipartUpload, abortedTaskIdentifiers)
             }
 
             switch snapshot {
@@ -440,8 +446,12 @@ class StorageMultipartUploadSession: @unchecked Sendable {
                 cancelProgressStallTimer()
                 onEvent(.completed(()))
             case .aborting(_, let error):
-                serialQueue.sync { cancelationError = error }
+                serialQueue.sync {
+                    cancelationError = error
+                    lastSeenBytesSent = [:]
+                }
                 cancelProgressStallTimer()
+                cancelUploadTasks(taskIdentifiers: abortedTaskIdentifiers)
                 try abort()
             case .aborted(_, let error):
                 let cancelationError = serialQueue.sync { self.cancelationError }
@@ -577,6 +587,25 @@ class StorageMultipartUploadSession: @unchecked Sendable {
         } catch {
             handle(multipartUploadEvent: .aborting(error: error))
         }
+    }
+
+    /// The URLSession tasks of the parts that are in progress. Call on `serialQueue`.
+    private func inProgressTaskIdentifiers(of multipartUpload: StorageMultipartUpload) -> [TaskIdentifier] {
+        (multipartUpload.parts ?? []).compactMap { part in
+            if case .inProgress(_, _, let taskIdentifier) = part {
+                return taskIdentifier
+            }
+            return nil
+        }
+    }
+
+    /// Cancels the URLSession tasks of the parts that were in progress when the upload was aborted.
+    /// Aborting the multipart upload does not stop them: each would send its whole part first,
+    /// and on a slow connection they starve the retry of the same upload.
+    private func cancelUploadTasks(taskIdentifiers: [TaskIdentifier]) {
+        guard !taskIdentifiers.isEmpty else { return }
+        logger.debug("Cancelling upload tasks of the aborted upload: \(taskIdentifiers)")
+        client.cancelUploadTasks(taskIdentifiers: taskIdentifiers) {}
     }
 
     private func abort() throws {
