@@ -399,10 +399,16 @@ class StorageMultipartUploadSession: @unchecked Sendable {
 
     func fail(error: Error) {
         logger.debug("Multipart Upload Failure: \(error)")
-        serialQueue.sync {
+        let failedTaskIdentifiers: [TaskIdentifier] = serialQueue.sync {
             logger.debug("Multipart Upload: \(multipartUpload)")
+            // Collect the tasks before the transition. An upload that already failed or is aborting
+            // exposes no parts, so nothing is cancelled twice.
+            let failedTaskIdentifiers = inProgressTaskIdentifiers(of: multipartUpload)
             multipartUpload.fail(error: error)
+            lastSeenBytesSent = [:]
+            return failedTaskIdentifiers
         }
+        cancelUploadTasks(taskIdentifiers: failedTaskIdentifiers, of: "failed")
         onEvent(.failed(StorageError(error: error)))
     }
 
@@ -599,12 +605,12 @@ class StorageMultipartUploadSession: @unchecked Sendable {
         }
     }
 
-    /// Cancels the URLSession tasks of the parts that were in progress when the upload was aborted.
-    /// Aborting the multipart upload does not stop them: each would send its whole part first,
-    /// and on a slow connection they starve the retry of the same upload.
-    private func cancelUploadTasks(taskIdentifiers: [TaskIdentifier]) {
+    /// Cancels the URLSession tasks of the parts that were in progress when the upload was aborted
+    /// or failed. Ending the multipart upload does not stop them: each would send its whole part
+    /// first, and on a slow connection they starve the retry of the same upload.
+    private func cancelUploadTasks(taskIdentifiers: [TaskIdentifier], of outcome: String = "aborted") {
         guard !taskIdentifiers.isEmpty else { return }
-        logger.debug("Cancelling upload tasks of the aborted upload: \(taskIdentifiers)")
+        logger.debug("Cancelling upload tasks of the \(outcome) upload: \(taskIdentifiers)")
         client.cancelUploadTasks(taskIdentifiers: taskIdentifiers) {}
     }
 

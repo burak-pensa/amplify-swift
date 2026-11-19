@@ -988,4 +988,90 @@ extension StorageMultipartUploadSessionTests {
         XCTAssertEqual(client.abortMultipartUploadCount, 1)
         XCTAssertEqual(client.cancelUploadTasksCallArguments.count, 1)
     }
+
+    /// T14 (APP-965 Q13).
+    /// Given: parts in progress
+    /// When: the upload fails with an error, as it does when a request of the client fails
+    /// Then: the URLSession task of every part in progress is cancelled, and no abort is sent
+    func testFailCancelsInProgressPartTasks() {
+        let client = MockMultipartUploadClient()
+        client.shouldStallPartUpload = true
+        let failed = expectation(description: "Failed")
+        let session = StorageMultipartUploadSession(client: client, bucket: "bucket", key: "key", onEvent: { event in
+            if case .failed = event {
+                failed.fulfill()
+            }
+        })
+
+        session.startUpload()
+        let started = client.everStalledTaskIdentifiers
+        XCTAssertFalse(started.isEmpty)
+        session.fail(error: MockMultipartUploadClient.Failure.mockFailure)
+
+        wait(for: [failed], timeout: 1.0)
+        XCTAssertEqual(client.cancelUploadTasksCallArguments.map(Set.init), [Set(started)])
+        XCTAssertEqual(client.abortMultipartUploadCount, 0)
+    }
+
+    /// T15 (APP-965 Q13).
+    /// Given: parts in progress
+    /// When: a part event cannot be handled, which fails the upload
+    /// Then: the URLSession tasks of the other parts in progress are cancelled
+    func testUnhandledPartEventCancelsInProgressPartTasks() {
+        let client = MockMultipartUploadClient()
+        client.shouldStallPartUpload = true
+        let failed = expectation(description: "Failed")
+        let session = StorageMultipartUploadSession(client: client, bucket: "bucket", key: "key", onEvent: { event in
+            if case .failed = event {
+                failed.fulfill()
+            }
+        })
+
+        session.startUpload()
+        let started = client.everStalledTaskIdentifiers
+        XCTAssertGreaterThan(started.count, 1)
+        // Part 1 completes, then reports completion again: the second event is not a valid transition.
+        session.handle(uploadPartEvent: .completed(partNumber: 1, eTag: "eTag-1", taskIdentifier: started[0]))
+        session.handle(uploadPartEvent: .completed(partNumber: 1, eTag: "eTag-1", taskIdentifier: started[0]))
+
+        wait(for: [failed], timeout: 1.0)
+        let cancelled = client.cancelUploadTasksCallArguments
+        XCTAssertEqual(cancelled.count, 1)
+        XCTAssertEqual(cancelled.first.map(Set.init), Set(started.dropFirst()))
+        XCTAssertEqual(client.abortMultipartUploadCount, 0)
+    }
+
+    /// T16 (APP-965 Q13).
+    /// Given: an upload that already failed, whose part tasks the failure cancelled
+    /// When: it fails again
+    /// Then: no task is cancelled a second time
+    func testFailTwiceDoesNotCancelTasksAgain() {
+        let client = MockMultipartUploadClient()
+        client.shouldStallPartUpload = true
+        let session = StorageMultipartUploadSession(client: client, bucket: "bucket", key: "key", onEvent: { _ in })
+
+        session.startUpload()
+        XCTAssertFalse(client.everStalledTaskIdentifiers.isEmpty)
+        session.fail(error: MockMultipartUploadClient.Failure.mockFailure)
+        session.fail(error: MockMultipartUploadClient.Failure.mockFailure)
+
+        XCTAssertEqual(client.cancelUploadTasksCallArguments.count, 1)
+    }
+
+    /// T17 (APP-965 Q13).
+    /// Given: an aborted upload, whose part tasks the abort cancelled
+    /// When: the abort request fails, which fails the upload
+    /// Then: no task is cancelled a second time
+    func testFailAfterAbortDoesNotCancelTasksAgain() {
+        let client = MockMultipartUploadClient()
+        client.shouldStallPartUpload = true
+        let session = StorageMultipartUploadSession(client: client, bucket: "bucket", key: "key", onEvent: { _ in })
+
+        session.startUpload()
+        XCTAssertFalse(client.everStalledTaskIdentifiers.isEmpty)
+        session.cancel()
+        session.fail(error: MockMultipartUploadClient.Failure.mockFailure)
+
+        XCTAssertEqual(client.cancelUploadTasksCallArguments.count, 1)
+    }
 }
